@@ -22,31 +22,31 @@ from wechatpy.utils import check_signature
 
 
 # ============================================================
-# 1. 微信公众号配置
+# 1. WeChat official account configuration
 # ============================================================
 
 WECHAT_TOKEN = "填写你的Token"
 
 WECHAT_ENCODING_AES_KEY = "填写你的EncodingAESKey"
 
-# 注意：
-# 这里填写“开发者ID AppID”，不是“原始ID”
+# Note:
+# Use the developer AppID here, not the original account ID.
 WECHAT_APP_ID = "填写你的AppID"
 
 
 # ============================================================
-# 2. 豆包 / 火山方舟配置
+# 2. Doubao / Volcengine Ark configuration
 # ============================================================
 
-# 在火山方舟控制台获取 API Key
+# Obtain the API key from the Volcengine Ark console.
 ARK_API_KEY = "填写你的ARK_API_KEY"
 
-# 填你实际开通的模型 ID
+# Set the model ID enabled for your account.
 #
-# 官方当前示例：
+# Current official example:
 # doubao-seed-2-1-pro-260628
 #
-# 如果你使用的是 Endpoint ID，也可以填 ep-xxxx
+# If you use an endpoint ID, you can also set it to ep-xxxx.
 DOUBAO_MODEL = "doubao-seed-2-1-pro-260628"
 
 DOUBAO_API_URL = (
@@ -55,15 +55,15 @@ DOUBAO_API_URL = (
 
 
 # ============================================================
-# 3. 微信快速回复时间预算
+# 3. WeChat fast reply time budget
 # ============================================================
 
-# 最多等豆包 3.5 秒
+# Wait up to 3.5 seconds for Doubao.
 FAST_REPLY_TIMEOUT = 3.5
 
-# 豆包自身 HTTP 请求允许更长时间
-# 即使微信已经返回“稍后发送结果”，
-# 后台任务仍然允许继续跑。
+# Allow more time for the Doubao HTTP request itself.
+# The background task continues even after WeChat receives
+# a reply asking the user to query the result later.
 DOUBAO_HTTP_TIMEOUT = 120.0
 
 
@@ -98,8 +98,8 @@ logger = logging.getLogger(__name__)
 
 def normalize_encoding_aes_key(key: str) -> str:
     """
-    微信后台给出的 EncodingAESKey 通常为 43 字符。
-    wechatpy/base64 可能需要补 '=' padding。
+    The EncodingAESKey from WeChat is usually 43 characters long.
+    wechatpy/base64 may require additional '=' padding.
     """
 
     key = key.strip()
@@ -146,9 +146,9 @@ class AIJob:
 
 
 # ------------------------------------------------------------
-# 当前测试版：
+# Current test version:
 #
-# 每个 OpenID 只保存最近一个 AI Job。
+# Keep only the latest AI job for each OpenID.
 #
 # key:
 #     openid
@@ -156,14 +156,14 @@ class AIJob:
 # value:
 #     AIJob
 #
-# 将来可以替换成 SQLite。
+# This storage can be replaced with SQLite in the future.
 # ------------------------------------------------------------
 
 jobs: dict[str, AIJob] = {}
 
 
 # ============================================================
-# 7. OpenID 日志脱敏
+# 7. Mask OpenIDs in logs
 # ============================================================
 
 def mask_openid(
@@ -184,7 +184,7 @@ def mask_openid(
 
 
 # ============================================================
-# 8. 调用豆包 API
+# 8. Call the Doubao API
 # ============================================================
 
 async def call_doubao(
@@ -214,11 +214,11 @@ async def call_doubao(
             },
         ],
 
-        # 非流式。
-        # 我们需要得到完整答案后再组成微信 XML。
+        # Use a non-streaming response.
+        # Wait for the complete answer before building the WeChat XML.
         "stream": False,
 
-        # 测试阶段先控制回复长度
+        # Limit the response length during testing.
         "max_tokens": 1000,
     }
 
@@ -236,13 +236,13 @@ async def call_doubao(
             json=payload,
         )
 
-    # HTTP 层异常
+    # Raise an exception for HTTP errors.
     response.raise_for_status()
 
     data = response.json()
 
     # --------------------------------------------------------
-    # 防御性检查
+    # Validate the response structure.
     # --------------------------------------------------------
 
     choices = data.get("choices")
@@ -274,7 +274,7 @@ async def call_doubao(
 
 
 # ============================================================
-# 9. AI 后台任务
+# 9. Background AI task
 # ============================================================
 
 async def run_ai_job(
@@ -283,11 +283,11 @@ async def run_ai_job(
     question: str,
 ) -> str:
     """
-    调用豆包，并把结果保存到 jobs。
+    Call Doubao and save the result in jobs.
 
-    很重要：
-    即使微信的 3.5 秒等待已经超时，
-    此 coroutine 仍然继续运行。
+    Important:
+    This coroutine continues running even after
+    WeChat's 3.5-second wait has timed out.
     """
 
     logger.info(
@@ -304,7 +304,7 @@ async def run_ai_job(
         )
 
         # ----------------------------------------------------
-        # 防止旧任务覆盖新任务
+        # Prevent an older job from overwriting a newer job.
         # ----------------------------------------------------
 
         current_job = jobs.get(
@@ -350,7 +350,7 @@ async def run_ai_job(
 
 
 # ============================================================
-# 10. 创建 AI Job
+# 10. Create an AI job
 # ============================================================
 
 def start_ai_job(
@@ -368,12 +368,11 @@ def start_ai_job(
     )
 
     # --------------------------------------------------------
-    # create_task：
+    # create_task:
     #
-    # 任务脱离当前 HTTP 等待逻辑运行。
+    # Run the task independently of the current HTTP wait.
     #
-    # 我们把 task 保存到 AIJob 中，
-    # 避免 Task 没有强引用。
+    # Store the task in AIJob to retain a strong reference.
     # --------------------------------------------------------
 
     task = asyncio.create_task(
@@ -392,7 +391,7 @@ def start_ai_job(
 
 
 # ============================================================
-# 11. AES 被动回复
+# 11. AES-encrypted passive reply
 # ============================================================
 
 def build_encrypted_reply(
@@ -402,7 +401,7 @@ def build_encrypted_reply(
     timestamp: str,
 ) -> str:
     """
-    构造微信被动文本回复，然后 AES 加密。
+    Build a WeChat passive text reply, then encrypt it with AES.
     """
 
     reply = create_reply(
@@ -422,7 +421,7 @@ def build_encrypted_reply(
 
 
 # ============================================================
-# 12. 处理“结果”
+# 12. Handle the result query command
 # ============================================================
 
 def get_job_result(
@@ -434,7 +433,7 @@ def get_job_result(
     )
 
     # --------------------------------------------------------
-    # 没有任务
+    # No job exists.
     # --------------------------------------------------------
 
     if job is None:
@@ -444,7 +443,7 @@ def get_job_result(
         )
 
     # --------------------------------------------------------
-    # 还在运行
+    # The job is still running.
     # --------------------------------------------------------
 
     if job.status == "processing":
@@ -454,7 +453,7 @@ def get_job_result(
         )
 
     # --------------------------------------------------------
-    # 完成
+    # The job has completed.
     # --------------------------------------------------------
 
     if job.status == "done":
@@ -467,7 +466,7 @@ def get_job_result(
         return job.answer
 
     # --------------------------------------------------------
-    # 调用失败
+    # The API call failed.
     # --------------------------------------------------------
 
     if job.status == "error":
@@ -482,7 +481,7 @@ def get_job_result(
 
 
 # ============================================================
-# 13. 首页
+# 13. Root endpoint
 # ============================================================
 
 @app.get("/")
@@ -494,7 +493,7 @@ async def root():
 
 
 # ============================================================
-# 14. 微信 GET 验证
+# 14. WeChat GET verification
 # ============================================================
 
 @app.get(
@@ -507,9 +506,9 @@ async def wechat_get(
     nonce: str | None = None,
     echostr: str | None = None,
 ):
-    # 普通浏览器直接访问 /wechat，
-    # 或请求缺少任何一个微信必需参数时，
-    # 不让 FastAPI 返回详细的 422 参数信息。
+    # For direct browser visits to /wechat or requests missing any
+    # required WeChat parameter, avoid returning FastAPI's detailed
+    # 422 validation response.
     if not all([
         signature,
         timestamp,
@@ -536,21 +535,21 @@ async def wechat_get(
             "Invalid WeChat GET signature."
         )
 
-        # 不向客户端暴露“这是微信签名验证接口”
+        # Do not reveal that this endpoint verifies WeChat signatures.
         return PlainTextResponse(
             "Not Found",
             status_code=404,
         )
 
-    # 只有真正通过微信签名校验后，
-    # 才返回 echostr 给微信服务器。
+    # Return echostr to the WeChat server only after
+    # the WeChat signature has been verified.
     return PlainTextResponse(
         echostr,
         status_code=200,
     )
 
 # ============================================================
-# 15. 微信 AES POST
+# 15. WeChat AES POST handler
 # ============================================================
 
 @app.post("/wechat")
@@ -561,7 +560,7 @@ async def wechat_post(
     request_start = time.monotonic()
 
     # --------------------------------------------------------
-    # URL 参数
+    # URL parameters
     # --------------------------------------------------------
 
     msg_signature = (
@@ -597,7 +596,7 @@ async def wechat_post(
         )
 
     # --------------------------------------------------------
-    # 微信加密 XML
+    # Encrypted WeChat XML
     # --------------------------------------------------------
 
     encrypted_xml = (
@@ -605,7 +604,7 @@ async def wechat_post(
     )
 
     # --------------------------------------------------------
-    # AES 解密
+    # AES decryption
     # --------------------------------------------------------
 
     try:
@@ -667,7 +666,7 @@ async def wechat_post(
     )
 
     # --------------------------------------------------------
-    # 暂时只处理文字
+    # Only text messages are currently supported.
     # --------------------------------------------------------
 
     if message.type != "text":
@@ -695,7 +694,7 @@ async def wechat_post(
     ).strip()
 
     # ========================================================
-    # 用户发送“结果”
+    # The user sends the result query command.
     # ========================================================
 
     if user_text == "结果":
@@ -729,14 +728,14 @@ async def wechat_post(
         )
 
     # ========================================================
-    # 普通问题
+    # Regular question
     # ========================================================
 
     # --------------------------------------------------------
-    # 如果当前已经有一个任务正在运行，
-    # 暂时不允许同一用户同时启动第二个。
+    # If a job is already running, do not allow the same user
+    # to start a second job concurrently.
     #
-    # 防止测试阶段任务互相覆盖。
+    # Prevent jobs from overwriting each other during testing.
     # --------------------------------------------------------
 
     existing_job = jobs.get(
@@ -768,7 +767,7 @@ async def wechat_post(
         )
 
     # --------------------------------------------------------
-    # 启动新的豆包任务
+    # Start a new Doubao job.
     # --------------------------------------------------------
 
     job = start_ai_job(
@@ -779,14 +778,14 @@ async def wechat_post(
     try:
 
         # ----------------------------------------------------
-        # 最关键的逻辑：
+        # Key behavior:
         #
-        # 最多只等待 3.5 秒。
+        # Wait for at most 3.5 seconds.
         #
-        # shield() 的作用：
+        # Purpose of shield():
         #
-        # wait_for 超时后，
-        # 不取消真正运行的豆包 Task。
+        # Keep the underlying Doubao task running
+        # when wait_for times out.
         # ----------------------------------------------------
 
         answer = await asyncio.wait_for(
@@ -797,7 +796,7 @@ async def wechat_post(
         )
 
         # ====================================================
-        # 豆包 3.5 秒以内完成
+        # Doubao completes within 3.5 seconds.
         # ====================================================
 
         reply_text = answer
@@ -809,9 +808,9 @@ async def wechat_post(
     except asyncio.TimeoutError:
 
         # ====================================================
-        # 超过 3.5 秒
+        # The 3.5-second wait has timed out.
         #
-        # job.task 仍然继续运行。
+        # job.task continues running.
         # ====================================================
 
         reply_text = (
@@ -837,7 +836,7 @@ async def wechat_post(
         )
 
     # --------------------------------------------------------
-    # 生成微信 AES 被动回复
+    # Build an AES-encrypted WeChat passive reply.
     # --------------------------------------------------------
 
     encrypted_reply = (
