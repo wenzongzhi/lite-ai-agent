@@ -1,0 +1,46 @@
+[wechat]
+token = ""
+encoding_aes_key = ""
+app_id = ""
+app_secret = ""
+
+[doubao]
+api_key = ""
+model = ""
+base_url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+http_timeout_seconds = 120
+
+[server]
+host = "127.0.0.1"
+port = 8000
+fast_reply_timeout_seconds = 3.5
+
+[features]
+ai_answer_enabled = true
+ai_agent_enabled = true
+allow_user_agent_self_enable = true
+agent_enable_phrase = "开启豆包agent功能"
+agent_disable_phrase = "关闭豆包agent功能"
+
+[agent]
+max_steps = 6
+tool_timeout_seconds = 15
+recent_message_limit = 12
+memory_summary_enabled = true
+memory_search_enabled = true
+max_tool_result_bytes = 8000
+
+[database]
+path = "./data/agent.db"
+
+[web_search]
+enabled = false
+provider = "brave"
+api_key = ""
+max_results = 5
+
+[calendar]
+enabled = false
+provider = "google"
+credentials_file = ""
+timezone = "Asia/Shanghai"

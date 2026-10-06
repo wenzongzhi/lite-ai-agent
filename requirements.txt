@@ -1,0 +1,5 @@
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+httpx>=0.27,<1
+wechatpy[cryptography]>=1.8.18,<2
+tomli>=2,<3; python_version < "3.11"

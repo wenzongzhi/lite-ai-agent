@@ -25,6 +25,7 @@ User sends a text message
 
 - If Doubao completes within **3.5 seconds**, the answer is returned immediately.
 - If it takes longer, the service returns a processing notice while the Doubao task continues in the background. The user can send **`结果`** (Chinese for "result") later to retrieve the answer.
+- Ordinary users use **ai-answer**, a dedicated Doubao Q&A path without tools. Users who opt in use **ai-agent**, with native Function Calling, bounded tool execution, and memory context.
 - If the same user already has a running task, new questions receive a waiting notice.
 - Non-text messages receive a notice explaining that only text messages are supported.
 
@@ -59,27 +60,42 @@ source .venv/bin/activate
 Install the dependencies:
 
 ```shell
-python -m pip install fastapi uvicorn httpx "wechatpy[cryptography]"
+python -m pip install -r requirements.txt
 ```
 
 `wechatpy[cryptography]` includes the dependencies needed for message encryption and decryption; see the [official wechatpy installation guide](https://docs.wechatpy.org/zh-cn/stable/install.html). The repository currently has no dependency lock file.
 
 ## Configuration
 
-Before starting the service, edit the configuration constants at the top of `app.py`:
+Copy `config.example.toml` to `config.toml` and fill in the required WeChat and Doubao settings. On Windows PowerShell:
 
-| Setting | Description |
+```powershell
+Copy-Item config.example.toml config.toml
+```
+
+On Linux / macOS:
+
+```shell
+cp config.example.toml config.toml
+```
+
+Settings use **environment variable > config.toml > built-in default** precedence. Set `WECHAT_AGENT_CONFIG` to load an alternate TOML path. The local config, `.env` files, and database files are ignored by Git. `.env` files are not automatically loaded.
+
+| Environment variable | TOML setting / description |
 | --- | --- |
-| `WECHAT_TOKEN` | Must match the Token in the WeChat Official Account's server configuration |
-| `WECHAT_ENCODING_AES_KEY` | The EncodingAESKey provided by WeChat; the code automatically adds Base64 padding |
-| `WECHAT_APP_ID` | The developer AppID of the WeChat Official Account, rather than its original account ID |
-| `ARK_API_KEY` | The API key obtained from the Volcengine Ark console |
-| `DOUBAO_MODEL` | An enabled model ID or an endpoint ID such as `ep-xxxx`; the code defaults to `doubao-seed-2-1-pro-260628` |
-| `DOUBAO_API_URL` | Default endpoint: `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
-| `FAST_REPLY_TIMEOUT` | Time to wait for an immediate Doubao reply; defaults to `3.5` seconds |
-| `DOUBAO_HTTP_TIMEOUT` | HTTP timeout for the Doubao request; defaults to `120.0` seconds |
+| `WECHAT_TOKEN` | `wechat.token`: must match the Official Account's server Token |
+| `WECHAT_ENCODING_AES_KEY` | `wechat.encoding_aes_key`: validated and padded automatically |
+| `WECHAT_APP_ID` | `wechat.app_id`: developer AppID, rather than the original account ID |
+| `WECHAT_APP_SECRET` | `wechat.app_secret`: optional, reserved for future integrations |
+| `DOUBAO_API_KEY` | `doubao.api_key`: Volcengine Ark API key |
+| `DOUBAO_MODEL` | `doubao.model`: required enabled model ID or endpoint ID such as `ep-xxxx` |
+| `DOUBAO_BASE_URL` | `doubao.base_url`: defaults to `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
+| `DOUBAO_HTTP_TIMEOUT_SECONDS` | `doubao.http_timeout_seconds`: defaults to `120` seconds |
+| `FAST_REPLY_TIMEOUT_SECONDS` | `server.fast_reply_timeout_seconds`: defaults to `3.5` seconds |
+| `AGENT_DB_PATH` | `database.path`: defaults to `./data/agent.db` |
+| `BRAVE_SEARCH_API_KEY` | `web_search.api_key`: only needed for optional Brave search |
 
-Configuration is currently defined directly in the source code. The application does not automatically read environment variables or `.env` files. Replace the placeholder credentials before starting it.
+The Token, EncodingAESKey, AppID, Doubao API key, and model are required. Startup reports missing field names without printing secrets. Other fields in the `features`, `agent`, `web_search`, and `calendar` sections have corresponding uppercase environment names, such as `FEATURES_AI_AGENT_ENABLED` and `AGENT_MAX_STEPS`.
 
 Doubao requests use Bearer API key authentication with `stream=False` and `max_tokens=1000`. Each request contains a fixed system prompt and the current user message. The system prompt asks for plain-text answers.
 
@@ -96,6 +112,52 @@ By default, it listens on `127.0.0.1:8000`, which is the local address used by t
 ```shell
 python -m uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
+
+`python app.py` also starts a local administrator CLI when stdin is interactive. The CLI runs in a separate thread while FastAPI handles requests. Starting through Uvicorn or from non-interactive stdin does not start the console.
+
+## Modes and Local CLI
+
+New users default to ordinary Q&A. Send `开启豆包agent功能` in WeChat to opt in to Agent mode, or `关闭豆包agent功能` to return to ordinary Q&A. These phrases are configurable and do not call Doubao. The per-user setting persists in SQLite. Set `features.allow_user_agent_self_enable = false` to allow only the administrator CLI to enable users.
+
+The local console accepts:
+
+```text
+help
+status
+enable ai-answer
+disable ai-answer
+enable ai-agent
+disable ai-agent
+show model
+set model <model-id>
+show fast-timeout
+set fast-timeout <seconds>
+config reload
+users
+jobs
+user show <openid>
+user agent enable <openid>
+user agent disable <openid>
+memory stats
+memory search <openid> <query>
+memory save <openid> <type> <content>
+quit
+```
+
+Global switches take precedence over per-user mode. Disabling a feature prevents new jobs for that mode; `结果` can still retrieve existing results. `config reload` reloads non-secret runtime controls and reports `restart required` for changed credentials, database paths, or listener settings. CLI changes last for the current process and are not written to TOML. `quit` stops the server. OpenIDs in console listings and logs are masked.
+
+## Tools and Memory
+
+Agent mode uses Ark's [native Function Calling](https://docs.volcengine.com/docs/ark/function-calling?lang=zh). The model requests tools; Python validates arguments and user permissions, applies timeouts, executes registered handlers, and limits results. Ordinary Q&A never receives tool schemas.
+
+- `calculator`: bounded arithmetic through an AST whitelist, without `eval`.
+- `memory_search`: up to five curated memory matches belonging to the current OpenID, using FTS5 with a parameterized LIKE fallback.
+- `fortune_telling`: a Python-generated random draw for entertainment only.
+- `web_search`: optional Brave provider returning compact titles, URLs, and snippets; disabled by default. Set `web_search.enabled = true` and configure an API key to enable it. See the [Brave API documentation](https://api-dashboard.search.brave.com/app/documentation/web-search/codes).
+
+Agent context automatically includes up to 12 recent messages and compact manually curated summaries. Use `memory save <openid> <type> <content>` to store a deliberate preference, project, decision, profile, todo, or summary. Summaries are updated per user; casual conversation is not automatically promoted to long-term memory. Default limits are six Agent steps, 15 seconds per tool, and 8000 bytes per tool result.
+
+Calendar currently provides a disabled provider interface. Google OAuth and real event operations are deferred. Calendar tools are not exposed to the model; future write tools must require explicit confirmation.
 
 ## Local Debugging with Cloudflare Tunnel
 
@@ -142,21 +204,41 @@ FastAPI's `/docs`, `/redoc`, and `/openapi.json` endpoints are disabled. Visitin
 
 Sending `结果` only queries the current user's latest task and does not start a new Doubao request. After a background task finishes, the user must query the result to receive it.
 
-## Current Limitations
+## Persistence and Current Limitations
 
-- Tasks are stored in the process's in-memory `jobs` dictionary. Only the latest task is retained per OpenID, and tasks and results are lost when the service restarts.
+- SQLite stores users, messages, jobs, and curated memories. Completed results and Agent enablement survive restart; stale processing jobs are marked interrupted and the user is asked to send the question again.
 - Run with a single worker so question requests and result queries share the same task state.
-- Each question is sent to the model independently; there is no multi-turn conversation history.
-- Duplicate requests are not deduplicated by WeChat message ID, and stored results have no automatic expiration or cleanup.
+- Ordinary Q&A remains independent per question. Agent mode includes limited recent context and curated memory.
+- Duplicate requests are not deduplicated by WeChat message ID, and stored records have no automatic expiration or cleanup.
+- Tool timeouts stop waiting for results; Python cannot forcibly terminate a synchronous handler already running in a worker thread. Built-in synchronous tools are bounded and local.
 
 ## Project Files
 
 ```text
 lite-ai-agent/
-├── app.py       # FastAPI service, WeChat encryption, Doubao calls, and task management
-├── README.md    # Project documentation
-└── LICENSE      # Apache License 2.0
+├── app.py                  # WeChat AES adapter and server / CLI startup
+├── config.py               # Typed settings and validation
+├── config.example.toml     # Configuration template
+├── services.py             # Service construction and safe runtime reload
+├── agent/                  # Doubao adapter, runtime state, and Agent Loop
+├── tools/                  # Registry, dispatcher, and explicit tool handlers
+├── memory/                 # SQLite schema, repository, and search
+├── cli/                    # Local command dispatcher and console thread
+├── wechat/                 # Crypto helpers and shared message / job router
+├── tests/                  # Offline regression and unit tests
+├── README.md
+├── README.zh-CN.md
+└── LICENSE
 ```
+
+## Tests
+
+```shell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Tests use mocked WeChat transport / Doubao / Brave responses and real local AES / SQLite operations, without calling external APIs. Test temporary files stay under the ignored `.pytest_cache` directory.
 
 ## License
 
